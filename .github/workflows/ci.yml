@@ -48,6 +48,12 @@ jobs:
       - name: Install project
         run: pip install -e ".[dev]"
 
+      - name: Cache Wikipedia article data
+        uses: actions/cache@v4
+        with:
+          path: cache/
+          key: wiki-draft-articles-v1
+
       - name: Fetch, render, and validate draft articles
         run: |
           cc-wp-book pipeline --draft
