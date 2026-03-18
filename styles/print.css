@@ -1,0 +1,236 @@
+/* cc-wp-book print stylesheet
+   Adapted from Wikipedia's clean, readable aesthetic for print. */
+
+/* === Reset & Base === */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    color: #202122;
+    font-family: 'Libre Baskerville', 'Georgia', serif;
+    font-size: 10pt;
+    line-height: 1.4;
+}
+
+/* === Article Layout === */
+.wiki-article {
+    page-break-before: always;
+}
+
+.wiki-article:first-child {
+    page-break-before: avoid;
+}
+
+.article-header {
+    margin-bottom: 1em;
+    border-bottom: 1px solid #a2a9b1;
+    padding-bottom: 0.5em;
+}
+
+.article-header h1 {
+    font-family: 'Source Sans Pro', 'Helvetica Neue', sans-serif;
+    font-size: 20pt;
+    font-weight: 700;
+    color: #000;
+    margin: 0;
+}
+
+/* === Lead Image === */
+.lead-image {
+    float: right;
+    margin: 0 0 1em 1em;
+    max-width: 40%;
+}
+
+.lead-image img {
+    width: 100%;
+    height: auto;
+}
+
+/* === Headings === */
+h2 {
+    font-family: 'Source Sans Pro', 'Helvetica Neue', sans-serif;
+    font-size: 14pt;
+    font-weight: 600;
+    border-bottom: 1px solid #a2a9b1;
+    padding-bottom: 0.25em;
+    margin-top: 1.2em;
+    margin-bottom: 0.5em;
+}
+
+h3 {
+    font-family: 'Source Sans Pro', 'Helvetica Neue', sans-serif;
+    font-size: 12pt;
+    font-weight: 600;
+    margin-top: 1em;
+    margin-bottom: 0.4em;
+}
+
+h4, h5, h6 {
+    font-family: 'Source Sans Pro', 'Helvetica Neue', sans-serif;
+    font-size: 10pt;
+    font-weight: 600;
+    margin-top: 0.8em;
+    margin-bottom: 0.3em;
+}
+
+/* === Body Text === */
+p {
+    margin-bottom: 0.6em;
+    text-align: justify;
+    hyphens: auto;
+    orphans: 2;
+    widows: 2;
+}
+
+/* === Infobox === */
+.infobox {
+    float: right;
+    clear: right;
+    width: 2.25in;
+    margin: 0 0 1em 1em;
+    padding: 0.5em;
+    border: 1px solid #a2a9b1;
+    background: #f8f9fa;
+    font-size: 8.5pt;
+    line-height: 1.3;
+}
+
+.infobox table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.infobox th,
+.infobox td {
+    padding: 2pt 4pt;
+    vertical-align: top;
+    border-bottom: 0.5pt solid #eaecf0;
+}
+
+.infobox th {
+    text-align: left;
+    font-weight: 600;
+    width: 35%;
+}
+
+/* === Callout Box (stripped sections) === */
+.stripped-sections-callout {
+    margin-top: 1.5em;
+    padding: 0.75em;
+    border: 1.5pt solid #3366cc;
+    border-radius: 4pt;
+    background: #f0f4ff;
+    font-size: 8.5pt;
+    line-height: 1.35;
+    page-break-inside: avoid;
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+}
+
+.stripped-sections-callout .callout-qr {
+    flex-shrink: 0;
+}
+
+.stripped-sections-callout p {
+    margin: 0;
+    text-align: left;
+}
+
+.stripped-sections-callout a {
+    color: #3366cc;
+    text-decoration: none;
+    word-break: break-all;
+}
+
+/* === Front Matter === */
+.front-matter {
+    page-break-after: always;
+}
+
+.front-matter h1 {
+    font-family: 'Source Sans Pro', 'Helvetica Neue', sans-serif;
+    font-size: 28pt;
+    text-align: center;
+    margin-top: 2in;
+    margin-bottom: 0.5em;
+}
+
+.front-matter h2 {
+    font-family: 'Source Sans Pro', 'Helvetica Neue', sans-serif;
+    font-size: 16pt;
+    text-align: center;
+    border: none;
+    color: #54595d;
+    margin-bottom: 2em;
+}
+
+.attribution {
+    margin-top: 2em;
+    font-size: 9pt;
+}
+
+.attribution h3 {
+    font-size: 11pt;
+    margin-top: 1.2em;
+    margin-bottom: 0.4em;
+}
+
+.toc {
+    page-break-before: always;
+}
+
+.toc ol {
+    column-count: 2;
+    column-gap: 1.5em;
+    padding-left: 1.5em;
+}
+
+.toc li {
+    font-size: 9pt;
+    margin-bottom: 0.2em;
+}
+
+/* === Lists === */
+ul, ol {
+    padding-left: 1.5em;
+    margin-bottom: 0.6em;
+}
+
+li {
+    margin-bottom: 0.2em;
+}
+
+/* === Tables === */
+table {
+    border-collapse: collapse;
+    margin: 0.8em 0;
+    font-size: 9pt;
+}
+
+th, td {
+    padding: 3pt 6pt;
+    border: 0.5pt solid #a2a9b1;
+    vertical-align: top;
+}
+
+th {
+    background: #eaecf0;
+    font-weight: 600;
+}
+
+/* === Print-specific === */
+@media print {
+    a {
+        color: #000;
+        text-decoration: none;
+    }
+
+    .stripped-sections-callout a {
+        color: #3366cc;
+    }
+}

@@ -1,0 +1,69 @@
+# cc-wp-book pipeline manifest
+# Controls all configurable aspects of the Wikipedia-to-print pipeline.
+
+# Sections to strip from every article by default.
+# Case-insensitive header matching. Sub-sections under these headers are also removed.
+strip_sections:
+  - References
+  - See also
+  - Further reading
+  - External links
+  - In popular culture
+  - Notes
+  - Gallery
+
+# Optional sections that can be stripped per-article or globally.
+# Set `enabled: true` to strip these from all articles.
+optional_strip_sections:
+  - name: History
+    enabled: false
+  - name: Legacy
+    enabled: false
+  - name: Criticism
+    enabled: false
+
+# Per-article overrides. Keyed by Wikipedia article title.
+# Each entry can specify additional sections to strip or sections to keep
+# even if they appear in the global strip list.
+article_overrides: {}
+  # Example:
+  # "Albert Einstein":
+  #   extra_strip: ["Awards and honors"]
+  #   keep: ["Notes"]
+
+# Volume layout
+volumes:
+  count: 5
+  balance_by: content_length  # content_length | article_count
+  trim_size:
+    width_in: 6.0
+    height_in: 9.0
+  bleed_in: 0.125
+
+# Typography
+typography:
+  body_font: "Libre Baskerville"
+  heading_font: "Source Sans Pro"
+  body_size_pt: 10
+  line_height: 1.4
+
+# Wikimedia API settings
+api:
+  user_agent: "cc-wp-book/0.1.0 (https://github.com/OWNER/cc_wp_book; contact@example.com)"
+  rate_limit_rps: 5
+  retry_attempts: 3
+  retry_backoff_seconds: 2
+
+# Callout box for stripped sections
+callout:
+  enabled: true
+  qr_code: true
+  qr_size_in: 0.75
+
+# Draft mode: render only these articles for CI preview
+draft_articles:
+  - Earth
+  - William Shakespeare
+  - Mathematics
+  - French Revolution
+  - DNA

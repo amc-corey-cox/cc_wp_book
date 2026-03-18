@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+*.pdf
+output/
+cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.mise.local.toml
+.claude/
