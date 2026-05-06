@@ -69,6 +69,11 @@ def strip_sections(
     cleaned_html = ""
     if html:
         cleaned_html = strip_sections_from_html(html, sections_to_strip)
+        cleaned_html = reposition_infobox(cleaned_html)
+        # Strip <style> blocks — we provide our own print CSS
+        cleaned_html = re.sub(
+            r"<style[^>]*>.*?</style>", "", cleaned_html, flags=re.DOTALL
+        )
         # Fix protocol-relative URLs for offline rendering
         cleaned_html = cleaned_html.replace('src="//', 'src="https://')
         cleaned_html = cleaned_html.replace('href="//', 'href="https://')
@@ -79,6 +84,97 @@ def strip_sections(
         cleaned_html=cleaned_html,
         stripped_sections=stripped,
         kept_sections=kept,
+    )
+
+
+def _extract_table(html: str, start: int) -> str | None:
+    """Extract a complete <table>...</table> from `start`, handling nesting."""
+    depth = 0
+    i = start
+    while i < len(html):
+        open_match = re.search(r"<table\b", html[i:], re.IGNORECASE)
+        close_match = re.search(r"</table>", html[i:], re.IGNORECASE)
+        if close_match is None:
+            return None
+        if open_match and open_match.start() < close_match.start():
+            depth += 1
+            i += open_match.start() + 6
+        else:
+            depth -= 1
+            end = i + close_match.end()
+            if depth == 0:
+                return html[start:end]
+            i = end
+    return None
+
+
+def reposition_infobox(html: str) -> str:
+    """Move the infobox from the top of the article to after the lead paragraphs.
+
+    Wikipedia's HTML puts the infobox table before the lead text.
+    For print, we move it to just before the first <h2>, so readers
+    get the introductory paragraphs first, then the fact sheet.
+
+    The infobox image row is stripped (the lead image is rendered
+    separately as a full-width hero) and the caption row is removed
+    since the title is already in the article header.
+    """
+    infobox_match = re.search(
+        r'<table\b[^>]*class="[^"]*\binfobox\b', html, re.IGNORECASE
+    )
+    if not infobox_match:
+        return html
+
+    infobox_html = _extract_table(html, infobox_match.start())
+    if not infobox_html:
+        return html
+
+    # Strip the image row and caption from the infobox
+    infobox_html = _strip_infobox_image(infobox_html)
+
+    # Remove infobox from original position
+    html_without = (
+        html[:infobox_match.start()] +
+        html[infobox_match.start() + len(infobox_html):]
+    )
+
+    # Find first <h2> — the boundary between lead and body sections
+    first_h2 = re.search(r"<h2[\s>]", html_without)
+    if not first_h2:
+        return html_without + _wrap_infobox(infobox_html)
+
+    insert_pos = first_h2.start()
+    return (
+        html_without[:insert_pos] +
+        _wrap_infobox(infobox_html) +
+        html_without[insert_pos:]
+    )
+
+
+def _strip_infobox_image(infobox_html: str) -> str:
+    """Remove the image row and caption from an infobox table.
+
+    These are redundant in print since the lead image is rendered
+    as a full-width hero above the article.
+    """
+    # Remove caption element (contains the article title)
+    infobox_html = re.sub(
+        r"<caption[^>]*>.*?</caption>", "", infobox_html, flags=re.DOTALL
+    )
+    # Remove rows with class="infobox-image"
+    infobox_html = re.sub(
+        r"<tr>\s*<td[^>]*class=\"[^\"]*infobox-image[^\"]*\"[^>]*>.*?</td>\s*</tr>",
+        "", infobox_html, flags=re.DOTALL,
+    )
+    return infobox_html
+
+
+def _wrap_infobox(infobox_html: str) -> str:
+    """Wrap the infobox in a print-friendly container."""
+    return (
+        '<div class="infobox-print-wrapper">'
+        f'{infobox_html}'
+        '</div>'
     )
 
 
