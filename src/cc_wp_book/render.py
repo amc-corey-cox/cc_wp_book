@@ -40,7 +40,7 @@ def render_article_html(
     lead_image_tag = ""
     if lead_image_path:
         if lead_image_path.startswith("/"):
-            src = f"file://{lead_image_path}"
+            src = Path(lead_image_path).resolve().as_uri()
         else:
             src = lead_image_path
         lead_image_tag = (
