@@ -36,14 +36,15 @@ volumes:
   count: 5
   balance_by: content_length  # content_length | article_count
   trim_size:
-    width_in: 6.0
-    height_in: 9.0
+    width_in: 8.25
+    height_in: 10.75
   bleed_in: 0.125
 
-# Typography
+# Typography — uses Wikipedia's own fonts (Linux Libertine / Biolinum),
+# bundled under fonts/ and loaded via @font-face. No system install needed.
 typography:
-  body_font: "Libre Baskerville"
-  heading_font: "Source Sans Pro"
+  body_font: "Linux Libertine"
+  heading_font: "Linux Biolinum"
   body_size_pt: 10
   line_height: 1.4
 

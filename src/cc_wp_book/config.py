@@ -23,8 +23,8 @@ REQUIRED_STRIP = {
 
 @dataclass
 class TrimSize:
-    width_in: float = 6.0
-    height_in: float = 9.0
+    width_in: float = 8.25
+    height_in: float = 10.75
 
 
 @dataclass
@@ -37,8 +37,8 @@ class VolumeConfig:
 
 @dataclass
 class TypographyConfig:
-    body_font: str = "Libre Baskerville"
-    heading_font: str = "Source Sans Pro"
+    body_font: str = "Linux Libertine"
+    heading_font: str = "Linux Biolinum"
     body_size_pt: int = 10
     line_height: float = 1.4
 

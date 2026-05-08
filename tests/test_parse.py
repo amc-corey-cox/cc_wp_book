@@ -1,6 +1,10 @@
 """Tests for section stripping logic."""
 
-from cc_wp_book.parse import strip_sections, strip_sections_from_html
+from cc_wp_book.parse import (
+    reposition_infobox,
+    strip_sections,
+    strip_sections_from_html,
+)
 
 SAMPLE_WIKITEXT = """\
 {{Infobox person
@@ -160,3 +164,98 @@ class TestStripSectionsFromHtml:
         cleaned = strip_sections_from_html(html, {"see also"})
         assert "Links" not in cleaned
         assert "Lead" in cleaned
+
+
+class TestRepositionInfobox:
+    def test_moves_infobox_before_first_h2(self):
+        html = (
+            '<table class="infobox"><tr><td>Data</td></tr></table>'
+            '<p>Lead paragraph.</p>'
+            '<h2>Section One</h2>'
+            '<p>Body text.</p>'
+        )
+        result = reposition_infobox(html)
+        h2_pos = result.index("<h2>")
+        wrapper_pos = result.index("infobox-print-wrapper")
+        lead_pos = result.index("Lead paragraph")
+        # Lead should come before the wrapper
+        assert lead_pos < wrapper_pos
+        # Wrapper should come before first h2
+        assert wrapper_pos < h2_pos
+
+    def test_wraps_in_print_wrapper(self):
+        html = (
+            '<table class="infobox"><tr><td>X</td></tr></table>'
+            '<p>Lead.</p>'
+            '<h2>Section</h2>'
+        )
+        result = reposition_infobox(html)
+        assert "infobox-print-wrapper" in result
+
+    def test_no_infobox_unchanged(self):
+        html = '<p>Just text.</p><h2>Section</h2>'
+        assert reposition_infobox(html) == html
+
+    def test_handles_nested_tables(self):
+        html = (
+            '<table class="infobox">'
+            '<tr><td><table><tr><td>Nested</td></tr></table></td></tr>'
+            '</table>'
+            '<p>Lead.</p>'
+            '<h2>Section</h2>'
+        )
+        result = reposition_infobox(html)
+        assert "Nested" in result
+        assert "infobox-print-wrapper" in result
+        # The nested table should be fully contained
+        assert result.count("<table") == result.count("</table>")
+
+    def test_no_h2_appends_at_end(self):
+        html = (
+            '<table class="infobox"><tr><td>Data</td></tr></table>'
+            '<p>Just lead text, no sections.</p>'
+        )
+        result = reposition_infobox(html)
+        assert result.endswith("</div>")
+
+    def test_strips_caption_and_image_row_and_leaves_no_residue(self):
+        # Realistic infobox shape: <caption>, infobox-image row, then data rows.
+        # This also guards the slice-length bug: stripping shrinks the table,
+        # so the original-position removal must use the *extracted* length,
+        # not the stripped length, or trailing markup leaks into html_without.
+        html = (
+            '<table class="infobox">'
+            '<caption>Earth</caption>'
+            '<tr><td class="infobox-image">'
+            '<img src="//upload/earth.jpg" alt="Earth" />'
+            '</td></tr>'
+            '<tr><th>Aphelion</th><td>152,097,597 km</td></tr>'
+            '<tr><th>Perihelion</th><td>147,098,450 km</td></tr>'
+            '</table>'
+            '<p>Earth is the third planet from the Sun.</p>'
+            '<h2>Etymology</h2>'
+            '<p>The word "Earth" derives from...</p>'
+        )
+        result = reposition_infobox(html)
+
+        # Caption and image row gone from the wrapped output
+        assert "<caption>" not in result
+        assert "infobox-image" not in result
+        assert "earth.jpg" not in result
+
+        # Data rows preserved
+        assert "Aphelion" in result
+        assert "Perihelion" in result
+
+        # No residue: the original infobox slot must be fully gone, with no
+        # stray "</td></tr></table>" fragments before the lead paragraph.
+        wrapper_start = result.index('<div class="infobox-print-wrapper">')
+        head = result[:wrapper_start]
+        assert "<table" not in head
+        assert "</table>" not in head
+        assert "</tr>" not in head
+        assert "</td>" not in head
+
+        # Tables stay balanced overall
+        assert result.count("<table") == result.count("</table>")
+        assert "infobox-print-wrapper" in result

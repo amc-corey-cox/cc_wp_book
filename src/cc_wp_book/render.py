@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 from pathlib import Path
 
@@ -11,13 +12,6 @@ from cc_wp_book.config import CalloutConfig, TypographyConfig, VolumeConfig
 logger = logging.getLogger(__name__)
 
 STYLES_DIR = Path(__file__).resolve().parent.parent.parent / "styles"
-
-
-def _load_stylesheet() -> str:
-    css_path = STYLES_DIR / "print.css"
-    if css_path.exists():
-        return css_path.read_text()
-    return ""
 
 
 def render_article_html(
@@ -41,11 +35,17 @@ def render_article_html(
             qr_size_in=cfg.qr_size_in,
         )
 
+    title_escaped = html.escape(title, quote=True)
+
     lead_image_tag = ""
     if lead_image_path:
+        if lead_image_path.startswith("/"):
+            src = Path(lead_image_path).resolve().as_uri()
+        else:
+            src = lead_image_path
         lead_image_tag = (
             f'<div class="lead-image">'
-            f'<img src="{lead_image_path}" alt="{title}" />'
+            f'<img src="{src}" alt="{title_escaped}" />'
             f"</div>"
         )
 
@@ -57,7 +57,7 @@ def render_article_html(
     return f"""<article class="wiki-article">
   <header class="article-header">
     {lead_image_tag}
-    <h1 style="font-family: {heading_family};">{title}</h1>
+    <h1 style="font-family: {heading_family};">{title_escaped}</h1>
   </header>
   <div class="article-body"
        style="font-family: {font_family};
@@ -98,7 +98,7 @@ def render_pdf(
     }}
     """
 
-    stylesheet_text = _load_stylesheet()
+    css_path = STYLES_DIR / "print.css"
     full_doc = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8" /></head>
@@ -109,8 +109,8 @@ def render_pdf(
 
     html = HTML(string=full_doc)
     css_objects = [CSS(string=page_css)]
-    if stylesheet_text:
-        css_objects.append(CSS(string=stylesheet_text))
+    if css_path.exists():
+        css_objects.append(CSS(filename=str(css_path)))
 
     html.write_pdf(str(output_path), stylesheets=css_objects)
     logger.info("Rendered PDF: %s", output_path)
