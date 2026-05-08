@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Optional
 
 import mwparserfromhell
 
@@ -29,16 +28,16 @@ import mwparserfromhell
 @dataclass
 class Citation:
     type: str = "free"
-    author: Optional[str] = None
-    editor: Optional[str] = None
-    year: Optional[str] = None
-    title: Optional[str] = None
-    chapter: Optional[str] = None
-    container: Optional[str] = None
-    volume: Optional[str] = None
-    issue: Optional[str] = None
-    pages: Optional[str] = None  # "p. 49" or "pp. 13114-13119" form
-    raw_html: Optional[str] = None
+    author: str | None = None
+    editor: str | None = None
+    year: str | None = None
+    title: str | None = None
+    chapter: str | None = None
+    container: str | None = None
+    volume: str | None = None
+    issue: str | None = None
+    pages: str | None = None  # "p. 49" or "pp. 13114-13119" form
+    raw_html: str | None = None
 
 
 _CITE_TYPES = {
@@ -54,7 +53,7 @@ _CITE_TYPES = {
 _STANDALONE_TITLE_TYPES = {"book"}
 
 
-def _get_param(template, *names: str) -> Optional[str]:
+def _get_param(template, *names: str) -> str | None:
     """Return the first non-empty value among the named params.
 
     Strips wikitext markup ([[link]], ''italic'', nested templates) so the
@@ -74,7 +73,7 @@ def _initials(first: str) -> str:
     return " ".join(f"{p[0]}." for p in re.split(r"\s+", first) if p)
 
 
-def _format_authors(template) -> Optional[str]:
+def _format_authors(template) -> str | None:
     last1 = _get_param(template, "last1", "last")
     first1 = _get_param(template, "first1", "first")
     if not last1:
@@ -92,7 +91,7 @@ def _format_authors(template) -> Optional[str]:
     return f"{last1},{initials}" + (" et al." if has_more else "")
 
 
-def _format_editors(template) -> Optional[str]:
+def _format_editors(template) -> str | None:
     last = _get_param(template, "editor-last", "editor1-last", "editor")
     first = _get_param(template, "editor-first", "editor1-first")
     if not last:
@@ -101,7 +100,7 @@ def _format_editors(template) -> Optional[str]:
     return f"{last},{initials} (ed.)"
 
 
-def _format_year(template) -> Optional[str]:
+def _format_year(template) -> str | None:
     year = _get_param(template, "year")
     if year:
         m = re.search(r"\d{4}", year)
@@ -113,7 +112,7 @@ def _format_year(template) -> Optional[str]:
     return None
 
 
-def _format_pages(template) -> Optional[str]:
+def _format_pages(template) -> str | None:
     pages = _get_param(template, "pages")
     if pages:
         return f"pp. {pages}"
@@ -123,7 +122,7 @@ def _format_pages(template) -> Optional[str]:
     return None
 
 
-def _build_citation_from_template(template) -> Optional[Citation]:
+def _build_citation_from_template(template) -> Citation | None:
     name = str(template.name).strip().lower()
     citation_type = _CITE_TYPES.get(name)
     if citation_type is None:
@@ -161,7 +160,7 @@ def _free_text_html(node) -> str:
     return text
 
 
-def _build_citation_from_tag(tag) -> Optional[Citation]:
+def _build_citation_from_tag(tag) -> Citation | None:
     """Pick the first cite template inside a <ref>'s contents, or fall back
     to free-text rendering. Returns None if the result would be empty."""
     templates = tag.contents.filter_templates(recursive=False)
@@ -305,7 +304,10 @@ def _essence_key(c: Citation):
         return None
     if not (c.author or c.title):
         return None
-    return (c.type, c.author, c.year, c.title, c.container, c.volume, c.issue, c.chapter)
+    return (
+        c.type, c.author, c.year, c.title,
+        c.container, c.volume, c.issue, c.chapter,
+    )
 
 
 def _short_author(author: str) -> str:
@@ -405,7 +407,7 @@ _OL_PATTERN = re.compile(
 )
 
 
-def _name_from_li_id(id_value: str) -> Optional[str]:
+def _name_from_li_id(id_value: str) -> str | None:
     """Extract the ref-name from a cite_note id like `NAME-N`. Returns
     None for purely numeric (anonymous) IDs. Decodes HTML entity-escaped
     underscores."""

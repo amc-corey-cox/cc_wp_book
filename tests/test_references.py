@@ -16,14 +16,18 @@ class TestFormatCompactBook:
             type="book", author="Wilkinson, J.", year="2009",
             title="New Eyes on the Sun", container="Springer",
         )
-        assert format_compact(c) == 'Wilkinson, J. (2009). <i>New Eyes on the Sun</i>. Springer.'
+        assert format_compact(c) == (
+            "Wilkinson, J. (2009). <i>New Eyes on the Sun</i>. Springer."
+        )
 
     def test_book_with_chapter(self):
         c = Citation(
             type="book", author="Smith, J.", year="2010",
             chapter="Origins", title="Big Book", container="Penguin",
         )
-        assert format_compact(c) == 'Smith, J. (2010). "Origins". In <i>Big Book</i>. Penguin.'
+        assert format_compact(c) == (
+            'Smith, J. (2010). "Origins". In <i>Big Book</i>. Penguin.'
+        )
 
 
 class TestFormatCompactJournal:
@@ -110,8 +114,10 @@ class TestExtractCitationMap:
         # differ in page= or other params even when "looks the same". We
         # match that behavior; only named-ref reuses dedupe.
         wikitext = (
-            '<ref>{{cite book |last=Rohli |first=R. |year=2018 |title=Climatology |page=49}}</ref>'
-            '<ref>{{cite book |last=Rohli |first=R. |year=2018 |title=Climatology |page=32}}</ref>'
+            "<ref>{{cite book |last=Rohli |first=R. |year=2018"
+            " |title=Climatology |page=49}}</ref>"
+            "<ref>{{cite book |last=Rohli |first=R. |year=2018"
+            " |title=Climatology |page=32}}</ref>"
         )
         cmap = extract_citation_map(wikitext)
         assert list(cmap.keys()) == [1, 2]
@@ -252,13 +258,16 @@ class TestShortenedAndRenderDedup:
         assert format_shortened(c) == "Smith (2010)."
 
     def test_render_first_full_subsequent_short(self):
+        def rohli(pages):
+            return Citation(
+                type="book", author="Rohli, R. V. et al.", year="2018",
+                title="Climatology", container="Jones & Bartlett", pages=pages,
+            )
+
         cites = {
-            1: Citation(type="book", author="Rohli, R. V. et al.", year="2018",
-                        title="Climatology", container="Jones & Bartlett", pages="p. 49"),
-            2: Citation(type="book", author="Rohli, R. V. et al.", year="2018",
-                        title="Climatology", container="Jones & Bartlett", pages="p. 32"),
-            3: Citation(type="book", author="Rohli, R. V. et al.", year="2018",
-                        title="Climatology", container="Jones & Bartlett", pages="p. 159"),
+            1: rohli("p. 49"),
+            2: rohli("p. 32"),
+            3: rohli("p. 159"),
         }
         rendered = render_citations(cites)
         assert "<i>Climatology</i>" in rendered[1]
@@ -292,10 +301,13 @@ class TestShortenedAndRenderDedup:
     def test_render_uses_first_position_as_canonical(self):
         # If position 5 is the first appearance, position 10 is the repeat.
         # Walking sorted positions ensures lower positions get the full form.
-        cites = {
-            10: Citation(type="book", author="Smith, J.", year="2010", title="T", pages="p. 99"),
-            5: Citation(type="book", author="Smith, J.", year="2010", title="T", pages="p. 1"),
-        }
+        def smith(pages):
+            return Citation(
+                type="book", author="Smith, J.", year="2010",
+                title="T", pages=pages,
+            )
+
+        cites = {10: smith("p. 99"), 5: smith("p. 1")}
         rendered = render_citations(cites)
         assert "<i>T</i>" in rendered[5]  # canonical
         assert rendered[10] == "Smith (2010), p. 99."  # short form
