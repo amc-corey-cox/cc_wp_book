@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 import mwparserfromhell
 
+from cc_wp_book.references import extract_citations, rewrite_references_section
+
 
 @dataclass
 class ParseResult:
@@ -69,6 +71,8 @@ def strip_sections(
     cleaned_html = ""
     if html:
         cleaned_html = strip_sections_from_html(html, sections_to_strip)
+        citations = extract_citations(cleaned_wikitext)
+        cleaned_html = rewrite_references_section(cleaned_html, citations)
         cleaned_html = reposition_infobox(cleaned_html)
         # Strip <style> blocks — we provide our own print CSS
         cleaned_html = re.sub(

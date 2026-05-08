@@ -4,7 +4,6 @@
 # Sections to strip from every article by default.
 # Case-insensitive header matching. Sub-sections under these headers are also removed.
 strip_sections:
-  - References
   - See also
   - Further reading
   - External links

@@ -219,6 +219,28 @@ p {
     width: 35%;
 }
 
+/* === References — 2-column compact CS1 === */
+ol.references {
+    column-count: 2;
+    column-gap: 1em;
+    column-rule: 0.25pt solid #c8ccd1;
+    font-size: 7pt;
+    line-height: 1.2;
+    padding-left: 1.5em;
+    margin-top: 0.5em;
+}
+
+ol.references li {
+    break-inside: avoid;
+    margin-bottom: 0.25em;
+    text-align: left;
+    hyphens: auto;
+}
+
+ol.references li i {
+    font-style: italic;
+}
+
 /* === Callout Box (stripped sections) === */
 .stripped-sections-callout {
     margin-top: 1.5em;
