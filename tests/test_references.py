@@ -2,9 +2,9 @@
 
 from cc_wp_book.references import (
     Citation,
-    extract_citations,
+    extract_citation_map,
     format_compact,
-    rewrite_references_section,
+    rewrite_references_inplace,
 )
 
 
@@ -79,74 +79,86 @@ class TestFormatCompactFreeText:
         assert format_compact(c) == "Some inline footnote text."
 
 
-class TestExtractCitations:
-    def test_named_ref_with_cite_book(self):
+class TestExtractCitationMap:
+    def test_named_ref_with_cite_book_at_position_one(self):
         wikitext = (
-            "Body text.<ref name=\"x\">{{cite book |last=Wilkinson |first=John "
-            "|year=2009 |title=New Eyes on the Sun |publisher=Springer}}</ref>"
+            'Body text.<ref name="x">{{cite book |last=Wilkinson |first=John '
+            '|year=2009 |title=New Eyes on the Sun |publisher=Springer}}</ref>'
         )
-        cites = extract_citations(wikitext)
-        assert len(cites) == 1
-        assert cites[0].type == "book"
-        assert cites[0].author == "Wilkinson, J."
-        assert cites[0].year == "2009"
-        assert cites[0].title == "New Eyes on the Sun"
-        assert cites[0].container == "Springer"
+        cmap = extract_citation_map(wikitext)
+        assert list(cmap.keys()) == [1]
+        c = cmap[1]
+        assert c.type == "book"
+        assert c.author == "Wilkinson, J."
+        assert c.year == "2009"
+        assert c.title == "New Eyes on the Sun"
+        assert c.container == "Springer"
 
     def test_named_reuse_does_not_duplicate(self):
         wikitext = (
-            "<ref name=\"a\">{{cite web |title=T |website=W |year=2020}}</ref>"
-            "More text.<ref name=\"a\" />"
-            "Even more.<ref name=\"a\" />"
+            '<ref name="a">{{cite web |title=T |website=W |year=2020}}</ref>'
+            '<ref name="a" />'
+            '<ref name="a" />'
         )
-        cites = extract_citations(wikitext)
-        assert len(cites) == 1
+        cmap = extract_citation_map(wikitext)
+        assert list(cmap.keys()) == [1]
 
-    def test_anonymous_ref_each_counted(self):
+    def test_anonymous_refs_each_distinct_even_if_identical(self):
+        # Wikipedia treats each anonymous <ref> as its own entry — they often
+        # differ in page= or other params even when "looks the same". We
+        # match that behavior; only named-ref reuses dedupe.
         wikitext = (
-            "<ref>{{cite web |title=A |website=Site1 |year=2020}}</ref>"
-            "<ref>{{cite web |title=B |website=Site2 |year=2021}}</ref>"
+            '<ref>{{cite book |last=Rohli |first=R. |year=2018 |title=Climatology |page=49}}</ref>'
+            '<ref>{{cite book |last=Rohli |first=R. |year=2018 |title=Climatology |page=32}}</ref>'
         )
-        cites = extract_citations(wikitext)
-        assert len(cites) == 2
-        assert cites[0].title == "A"
-        assert cites[1].title == "B"
+        cmap = extract_citation_map(wikitext)
+        assert list(cmap.keys()) == [1, 2]
+        assert cmap[1].pages == "p. 49"
+        assert cmap[2].pages == "p. 32"
+
+    def test_distinct_anonymous_each_get_position(self):
+        wikitext = (
+            '<ref>{{cite web |title=A |website=Site1 |year=2020}}</ref>'
+            '<ref>{{cite web |title=B |website=Site2 |year=2021}}</ref>'
+        )
+        cmap = extract_citation_map(wikitext)
+        assert list(cmap.keys()) == [1, 2]
+        assert cmap[1].title == "A"
+        assert cmap[2].title == "B"
 
     def test_document_order_preserved(self):
         wikitext = (
-            "<ref name=\"first\">{{cite web |title=First |year=2020}}</ref>"
-            "<ref name=\"second\">{{cite web |title=Second |year=2021}}</ref>"
-            "<ref name=\"first\" />"
-            "<ref name=\"third\">{{cite web |title=Third |year=2022}}</ref>"
+            '<ref name="first">{{cite web |title=First |year=2020}}</ref>'
+            '<ref name="second">{{cite web |title=Second |year=2021}}</ref>'
+            '<ref name="first" />'
+            '<ref name="third">{{cite web |title=Third |year=2022}}</ref>'
         )
-        cites = extract_citations(wikitext)
-        assert [c.title for c in cites] == ["First", "Second", "Third"]
+        cmap = extract_citation_map(wikitext)
+        assert [cmap[i].title for i in [1, 2, 3]] == ["First", "Second", "Third"]
 
     def test_multiple_authors_get_et_al(self):
         wikitext = (
-            "<ref>{{cite journal "
-            "|last1=Argus |first1=D. F. "
-            "|last2=Gordon |first2=R. G. "
-            "|year=2011 |title=Plate motions |journal=GGG}}</ref>"
+            '<ref>{{cite journal '
+            '|last1=Argus |first1=D. F. '
+            '|last2=Gordon |first2=R. G. '
+            '|year=2011 |title=Plate motions |journal=GGG}}</ref>'
         )
-        cites = extract_citations(wikitext)
-        assert cites[0].author == "Argus, D. F. et al."
+        cmap = extract_citation_map(wikitext)
+        assert cmap[1].author == "Argus, D. F. et al."
 
     def test_year_extracted_from_date(self):
-        wikitext = (
-            "<ref>{{cite web |title=T |website=W |date=18 July 2013}}</ref>"
-        )
-        cites = extract_citations(wikitext)
-        assert cites[0].year == "2013"
+        wikitext = '<ref>{{cite web |title=T |website=W |date=18 July 2013}}</ref>'
+        cmap = extract_citation_map(wikitext)
+        assert cmap[1].year == "2013"
 
     def test_url_and_archive_fields_dropped(self):
         wikitext = (
-            "<ref>{{cite web |title=T |website=W |year=2013 "
-            "|url=https://example.com |archive-url=https://web.archive.org/x "
-            "|access-date=3 January 2023 |archive-date=27 January 2023}}</ref>"
+            '<ref>{{cite web |title=T |website=W |year=2013 '
+            '|url=https://example.com |archive-url=https://web.archive.org/x '
+            '|access-date=3 January 2023 |archive-date=27 January 2023}}</ref>'
         )
-        cites = extract_citations(wikitext)
-        rendered = format_compact(cites[0])
+        cmap = extract_citation_map(wikitext)
+        rendered = format_compact(cmap[1])
         assert "http" not in rendered
         assert "archive" not in rendered.lower()
         assert "retrieved" not in rendered.lower()
@@ -154,49 +166,92 @@ class TestExtractCitations:
 
     def test_free_text_ref(self):
         wikitext = (
-            "<ref>This is an explanatory footnote, not a citation.</ref>"
+            '<ref>This is an explanatory footnote, not a citation.</ref>'
         )
-        cites = extract_citations(wikitext)
-        assert cites[0].type == "free"
-        assert "explanatory footnote" in (cites[0].raw_html or "")
+        cmap = extract_citation_map(wikitext)
+        assert cmap[1].type == "free"
+        assert "explanatory footnote" in (cmap[1].raw_html or "")
 
     def test_self_closing_only_no_content_skipped(self):
-        wikitext = "Body.<ref name=\"x\" />"
-        cites = extract_citations(wikitext)
-        assert cites == []
+        wikitext = 'Body.<ref name="x" />'
+        cmap = extract_citation_map(wikitext)
+        assert cmap == {}
 
-
-class TestRewriteReferencesSection:
-    def test_replaces_existing_ol(self):
-        html = (
-            "<p>Body.</p>"
-            '<ol class="references"><li id="cite_note-1">old</li></ol>'
+    def test_grouped_refs_skipped(self):
+        # Refs with group="..." belong to Notes-style separate lists and
+        # are intentionally not rewritten — left in their original form.
+        wikitext = (
+            '<ref name="body-ref">{{cite web |title=Body |year=2020}}</ref>'
+            '<ref name="note1" group="n">An explanatory note.</ref>'
+            '<ref name="body-ref-2">{{cite web |title=Body2 |year=2021}}</ref>'
         )
-        cites = [Citation(type="free", raw_html="new entry")]
-        result = rewrite_references_section(html, cites)
-        assert "old" not in result
-        assert "new entry" in result
-        assert '<ol class="references">' in result
-        assert 'id="cite_note-1"' in result
+        cmap = extract_citation_map(wikitext)
+        assert list(cmap.keys()) == [1, 2]
+        assert cmap[1].title == "Body"
+        assert cmap[2].title == "Body2"
 
-    def test_consolidates_multiple_blocks(self):
+
+class TestRewriteReferencesInplace:
+    def test_replaces_li_content_when_position_matches(self):
         html = (
-            '<ol class="references"><li>notes</li></ol>'
-            "<p>Body.</p>"
-            '<ol class="references"><li>refs</li></ol>'
+            '<ol class="references">'
+            '<li id="cite_note-x-1">old content</li>'
+            '<li id="cite_note-2">other old</li>'
+            '</ol>'
         )
-        cites = [Citation(type="free", raw_html="x")]
-        result = rewrite_references_section(html, cites)
-        assert result.count('<ol class="references">') == 1
+        cmap = {
+            1: Citation(type="free", raw_html="new one"),
+            2: Citation(type="free", raw_html="new two"),
+        }
+        result = rewrite_references_inplace(html, cmap)
+        assert "old content" not in result
+        assert "other old" not in result
+        assert "new one" in result
+        assert "new two" in result
+        assert 'id="cite_note-x-1"' in result
+        assert 'id="cite_note-2"' in result
 
-    def test_no_citations_strips_existing_ol(self):
-        html = '<p>Body.</p><ol class="references"><li>old</li></ol>'
-        result = rewrite_references_section(html, [])
-        assert '<ol class="references">' not in result
+    def test_leaves_unmapped_li_unchanged(self):
+        html = (
+            '<ol class="references">'
+            '<li id="cite_note-x-1">replace me</li>'
+            '<li id="cite_note-note1-2">explanatory footnote</li>'
+            '</ol>'
+        )
+        cmap = {1: Citation(type="free", raw_html="new")}
+        result = rewrite_references_inplace(html, cmap)
+        assert "new" in result
+        assert "replace me" not in result
+        assert "explanatory footnote" in result  # untouched
+
+    def test_handles_html_entity_encoded_ids(self):
+        # Wikipedia HTML uses &#95; for _ in some contexts.
+        html = '<li id="cite&#95;note-foo-1">old</li>'
+        cmap = {1: Citation(type="free", raw_html="new")}
+        result = rewrite_references_inplace(html, cmap)
+        assert "new" in result
         assert "old" not in result
 
-    def test_no_existing_ol_unchanged(self):
-        html = "<p>Body.</p>"
-        cites = [Citation(type="free", raw_html="x")]
-        result = rewrite_references_section(html, cites)
+    def test_preserves_multiple_ol_blocks(self):
+        # Notes section + References section — both should keep their
+        # <ol> structure; only the entries we have data for get rewritten.
+        html = (
+            '<h2>Notes</h2>'
+            '<ol class="references"><li id="cite_note-noteA-1">note one</li></ol>'
+            '<h2>References</h2>'
+            '<ol class="references"><li id="cite_note-mainref-2">main ref</li></ol>'
+        )
+        cmap = {2: Citation(type="free", raw_html="compact main")}
+        result = rewrite_references_inplace(html, cmap)
+        # Both <ol> blocks survive
+        assert result.count('<ol class="references">') == 2
+        # Notes <li> untouched
+        assert "note one" in result
+        # References <li> rewritten
+        assert "compact main" in result
+        assert "main ref" not in result
+
+    def test_empty_map_no_changes(self):
+        html = '<li id="cite_note-x-1">content</li>'
+        result = rewrite_references_inplace(html, {})
         assert result == html

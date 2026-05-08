@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import mwparserfromhell
 
-from cc_wp_book.references import extract_citations, rewrite_references_section
+from cc_wp_book.references import extract_citation_map, rewrite_references_inplace
 
 
 @dataclass
@@ -71,8 +71,10 @@ def strip_sections(
     cleaned_html = ""
     if html:
         cleaned_html = strip_sections_from_html(html, sections_to_strip)
-        citations = extract_citations(cleaned_wikitext)
-        cleaned_html = rewrite_references_section(cleaned_html, citations)
+        # Build citation map from the *original* wikitext so li position
+        # numbers align with Wikipedia's renderer (which sees the full doc).
+        citations = extract_citation_map(wikitext)
+        cleaned_html = rewrite_references_inplace(cleaned_html, citations)
         cleaned_html = reposition_infobox(cleaned_html)
         # Strip <style> blocks — we provide our own print CSS
         cleaned_html = re.sub(
@@ -187,16 +189,23 @@ def strip_sections_from_html(
 ) -> str:
     """Remove sections from Wikipedia's rendered HTML by heading text.
 
-    Wikipedia's API returns HTML where sections are delimited by
-    <h2>, <h3>, etc. tags containing <span class="mw-headline">.
-    We split on these boundaries and filter out matched sections
-    and their sub-sections.
+    Heading text is extracted from the <h2>/<h3>/... element's inner content
+    (any tags stripped). This handles both the legacy
+    <h2><span class="mw-headline">X</span></h2> format and the newer
+    <h2 id="X">X</h2> format Wikipedia now emits.
+
+    Wikipedia wraps heading elements in <div class="mw-heading mw-heading2">.
+    We strip from the wrapping div if present so the whole heading block goes.
     """
+    # Two heading formats: legacy bare <h\d> and modern wrapped in
+    # <div class="mw-heading">...<h\d>...</h\d>...</div>. The wrapped form
+    # tries first so we strip the whole div block, not just the h\d inside.
     heading_pattern = re.compile(
-        r"<h(\d)\b[^>]*>.*?</h\1>", re.DOTALL
-    )
-    headline_text_pattern = re.compile(
-        r'class="mw-headline"[^>]*>([^<]+)<'
+        r'<div\s+class="[^"]*\bmw-heading\b[^"]*"[^>]*>.*?'
+        r'<h(\d)\b[^>]*>(.*?)</h\1>.*?</div>'
+        r'|'
+        r'<h(\d)\b[^>]*>(.*?)</h\d>',
+        re.DOTALL,
     )
 
     parts: list[dict] = []
@@ -208,9 +217,9 @@ def strip_sections_from_html(
                 "type": "content",
                 "text": html[last_end:match.start()],
             })
-        text_match = headline_text_pattern.search(match.group())
-        heading_text = text_match.group(1).strip() if text_match else ""
-        level = int(match.group(1))
+        level = int(match.group(1) or match.group(3))
+        inner = match.group(2) or match.group(4) or ""
+        heading_text = re.sub(r"<[^>]+>", "", inner).strip()
         parts.append({
             "type": "heading",
             "level": level,

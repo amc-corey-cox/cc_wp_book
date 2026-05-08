@@ -1,16 +1,26 @@
 """Compact CS1-style citation rendering for print.
 
 Wikipedia uses Citation Style 1 (CS1) via {{cite book}}, {{cite journal}}, etc.
-For print, we extract the structured fields from wikitext templates and render
-a compact, CS1-conformant subset. URLs, DOIs, ISBNs, archive links, and access
-dates are dropped — the article-level QR/Wikipedia pointer is the digital
-companion that closes that gap.
+For print, we extract the structured fields from the wikitext templates and
+re-render a compact, CS1-conformant subset. URLs, DOIs, ISBNs, archive links,
+and access dates are dropped — the article-level QR/Wikipedia pointer is the
+digital companion that closes that gap.
+
+Approach: in-place transform. Wikipedia's renderer has already deduplicated
+refs and assigned them positions in the rendered <ol class="references">.
+We walk those <li> entries and replace the content of each with our compact
+rendering, looking up the corresponding wikitext template by position.
+
+Refs declared inside {{reflist|refs=...}} (Wikipedia's pattern for
+explanatory-note groups) are not picked up by our top-level walk, so those
+<li>s are left untouched — Notes-style footnotes keep their original
+rendering until they're addressed in their own pass.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 import mwparserfromhell
@@ -24,10 +34,11 @@ class Citation:
     year: Optional[str] = None
     title: Optional[str] = None
     chapter: Optional[str] = None
-    container: Optional[str] = None  # journal | website | newspaper | encyclopedia | publisher
+    container: Optional[str] = None
     volume: Optional[str] = None
     issue: Optional[str] = None
-    raw_html: Optional[str] = None  # for free-text refs, preserved verbatim
+    pages: Optional[str] = None  # "p. 49" or "pp. 13114-13119" form
+    raw_html: Optional[str] = None
 
 
 _CITE_TYPES = {
@@ -44,31 +55,36 @@ _STANDALONE_TITLE_TYPES = {"book"}
 
 
 def _get_param(template, *names: str) -> Optional[str]:
-    """Return the first non-empty value among the named params."""
+    """Return the first non-empty value among the named params.
+
+    Strips wikitext markup ([[link]], ''italic'', nested templates) so the
+    returned string is plain text suitable for our own re-formatting.
+    """
     for name in names:
         if template.has(name):
-            value = str(template.get(name).value).strip()
+            wikicode = template.get(name).value
+            value = wikicode.strip_code().strip()
             value = re.sub(r"\s+", " ", value)
             if value:
                 return value
     return None
 
 
+def _initials(first: str) -> str:
+    return " ".join(f"{p[0]}." for p in re.split(r"\s+", first) if p)
+
+
 def _format_authors(template) -> Optional[str]:
-    """CS1-style author rendering: 'Last, F.' or 'Last, F. et al.' if multiple."""
     last1 = _get_param(template, "last1", "last")
     first1 = _get_param(template, "first1", "first")
     if not last1:
         author1 = _get_param(template, "author1", "author")
         if author1:
-            return author1 + (" et al." if template.has("last2") or template.has("author2") else "")
+            has_more = template.has("last2") or template.has("author2")
+            return author1 + (" et al." if has_more else "")
         return None
 
-    initials = ""
-    if first1:
-        initials = " " + " ".join(
-            f"{p[0]}." for p in re.split(r"\s+", first1) if p
-        )
+    initials = " " + _initials(first1) if first1 else ""
     has_more = (
         template.has("last2") or template.has("author2")
         or _get_param(template, "display-authors") == "etal"
@@ -81,11 +97,7 @@ def _format_editors(template) -> Optional[str]:
     first = _get_param(template, "editor-first", "editor1-first")
     if not last:
         return None
-    initials = ""
-    if first:
-        initials = " " + " ".join(
-            f"{p[0]}." for p in re.split(r"\s+", first) if p
-        )
+    initials = " " + _initials(first) if first else ""
     return f"{last},{initials} (ed.)"
 
 
@@ -101,6 +113,16 @@ def _format_year(template) -> Optional[str]:
     return None
 
 
+def _format_pages(template) -> Optional[str]:
+    pages = _get_param(template, "pages")
+    if pages:
+        return f"pp. {pages}"
+    page = _get_param(template, "page")
+    if page:
+        return f"p. {page}"
+    return None
+
+
 def _build_citation_from_template(template) -> Optional[Citation]:
     name = str(template.name).strip().lower()
     citation_type = _CITE_TYPES.get(name)
@@ -109,18 +131,18 @@ def _build_citation_from_template(template) -> Optional[Citation]:
 
     c = Citation(type=citation_type)
     c.author = _format_authors(template) or _format_editors(template)
-    if c.author is None and (ed := _format_editors(template)):
-        c.editor = ed
     c.year = _format_year(template)
     c.title = _get_param(template, "title")
     c.chapter = _get_param(template, "chapter")
 
     if citation_type == "book":
         c.container = _get_param(template, "publisher")
+        c.pages = _format_pages(template)
     elif citation_type == "journal":
         c.container = _get_param(template, "journal", "periodical")
         c.volume = _get_param(template, "volume")
         c.issue = _get_param(template, "issue", "number")
+        c.pages = _format_pages(template)
     elif citation_type == "web":
         c.container = _get_param(template, "website", "work", "publisher")
     elif citation_type == "news":
@@ -134,55 +156,70 @@ def _build_citation_from_template(template) -> Optional[Citation]:
 
 
 def _free_text_html(node) -> str:
-    """Render a non-cite-template <ref> body as plain text, stripped of cruft.
-
-    `node` is an mwparserfromhell Wikicode object. `strip_code()` removes
-    wikitext markup ([[links]], ''italic'', templates, etc.) leaving readable
-    plain text. We then collapse whitespace.
-    """
     text = node.strip_code() if hasattr(node, "strip_code") else str(node)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
-def extract_citations(wikitext: str) -> list[Citation]:
-    """Walk wikitext <ref> tags in document order; return one Citation per
-    *unique* ref (named refs deduped on first content occurrence; anonymous
-    refs always counted; <ref name="X" /> reuses skipped).
+def _build_citation_from_tag(tag) -> Optional[Citation]:
+    """Pick the first cite template inside a <ref>'s contents, or fall back
+    to free-text rendering. Returns None if the result would be empty."""
+    templates = tag.contents.filter_templates(recursive=False)
+    cite_template = next(
+        (t for t in templates if str(t.name).strip().lower() in _CITE_TYPES),
+        None,
+    )
+    if cite_template is not None:
+        c = _build_citation_from_template(cite_template)
+        if c is not None and (c.title or c.author or c.container):
+            return c
 
-    Order matches the rendered <ol class="references"> ordering.
+    raw = _free_text_html(tag.contents)
+    if not raw:
+        return None
+    return Citation(type="free", raw_html=raw)
+
+
+def extract_citation_map(wikitext: str) -> dict[int, Citation]:
+    """Build {visible_position: Citation} aligned with Wikipedia's renderer.
+
+    Walks <ref> tags recursively so refs inside templates and tables are
+    picked up (matches Wikipedia's renderer behavior).
+
+    Dedupe matches Wikipedia: named refs first occurrence wins; subsequent
+    occurrences (self-closing reuse or repeated content) share the position.
+    Anonymous refs are NOT deduped by content — each anonymous <ref> tag is
+    its own entry, even if textually identical, since they often differ in
+    page= or other params (Wikipedia treats them as distinct).
     """
-    code = mwparserfromhell.parse(wikitext)
-    citations: list[Citation] = []
-    seen_names: set[str] = set()
+    parsed = mwparserfromhell.parse(wikitext)
+    name_positions: dict[str, int] = {}
+    citations: dict[int, Citation] = {}
+    next_pos = 1
 
-    for tag in code.filter_tags():
+    for tag in parsed.filter_tags():
         if str(tag.tag).lower() != "ref":
             continue
-
-        name_attr = tag.get("name") if tag.has("name") else None
-        ref_name = str(name_attr.value).strip() if name_attr else None
-
         if not tag.contents:
-            continue  # self-closing reuse like <ref name="X" />
+            continue
 
-        if ref_name is not None:
-            if ref_name in seen_names:
+        # Skip refs in non-default groups (e.g., group="n" for Notes).
+        # Those have their own <ol class="references"> rendered separately
+        # and are intentionally left untouched here.
+        if tag.has("group"):
+            continue
+
+        if tag.has("name"):
+            name = str(tag.get("name").value).strip()
+            if name in name_positions:
                 continue
-            seen_names.add(ref_name)
+            name_positions[name] = next_pos
 
-        templates = tag.contents.filter_templates(recursive=False)
-        cite_template = next(
-            (t for t in templates if str(t.name).strip().lower() in _CITE_TYPES),
-            None,
-        )
-        if cite_template is not None:
-            citation = _build_citation_from_template(cite_template)
-            if citation is not None:
-                citations.append(citation)
-                continue
-
-        citations.append(Citation(type="free", raw_html=_free_text_html(tag.contents)))
+        citation = _build_citation_from_tag(tag)
+        if citation is None:
+            continue
+        citations[next_pos] = citation
+        next_pos += 1
 
     return citations
 
@@ -192,7 +229,6 @@ def _terminate(s: str) -> str:
 
 
 def format_compact(c: Citation) -> str:
-    """Render a Citation as compact CS1-conformant HTML."""
     if c.type == "free":
         return c.raw_html or ""
 
@@ -223,42 +259,54 @@ def format_compact(c: Citation) -> str:
                     container_str += f"({c.issue})"
             parts.append(container_str + ".")
 
+    if c.pages:
+        parts.append(f"{c.pages}.")
+
     if not c.author and c.year:
         parts.append(f"({c.year}).")
 
     return " ".join(parts)
 
 
-_REFERENCES_OL_PATTERN = re.compile(
-    r'<ol class="references[^"]*"[^>]*>.*?</ol>',
-    re.DOTALL,
+_LI_PATTERN = re.compile(
+    r'(<li id="cite(?:_|&#95;)note-([^"]+)"[^>]*>)(.*?)(</li>)',
+    re.DOTALL | re.IGNORECASE,
 )
 
 
-def rewrite_references_section(html: str, citations: list[Citation]) -> str:
-    """Replace each <ol class="references"> block with a compact rendering.
+def _position_from_li_id(id_value: str) -> Optional[int]:
+    """Extract trailing position number from a cite_note id.
 
-    The first block is replaced with our compact list of `citations`.
-    Subsequent blocks (e.g., from a Notes section) are removed — we render
-    a single consolidated bibliography.
+    Both `cite_note-NAME-N` and `cite_note-N` end with the visible
+    list-position number. We just match the trailing digits.
+    """
+    m = re.search(r"(\d+)$", id_value)
+    return int(m.group(1)) if m else None
+
+
+def rewrite_references_inplace(
+    html: str, citations: dict[int, Citation]
+) -> str:
+    """For each <li id="cite_note-..."> in HTML, replace its inner content
+    with our compact rendering if we have a Citation for that position.
+    Otherwise leave the <li> unchanged.
     """
     if not citations:
-        return _REFERENCES_OL_PATTERN.sub("", html)
-
-    matches = list(_REFERENCES_OL_PATTERN.finditer(html))
-    if not matches:
         return html
 
-    items = "".join(
-        f'<li id="cite_note-{i + 1}">{format_compact(c)}</li>'
-        for i, c in enumerate(citations)
-    )
-    new_ol = f'<ol class="references">{items}</ol>'
+    def replace(match: re.Match) -> str:
+        opening = match.group(1)
+        id_value = match.group(2)
+        closing = match.group(4)
 
-    parts = [html[: matches[0].start()], new_ol]
-    last_end = matches[0].end()
-    for m in matches[1:]:
-        parts.append(html[last_end : m.start()])
-        last_end = m.end()
-    parts.append(html[last_end:])
-    return "".join(parts)
+        position = _position_from_li_id(id_value)
+        if position is None:
+            return match.group(0)
+
+        citation = citations.get(position)
+        if citation is None:
+            return match.group(0)
+
+        return f"{opening}{format_compact(citation)}{closing}"
+
+    return _LI_PATTERN.sub(replace, html)
