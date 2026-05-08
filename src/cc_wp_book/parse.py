@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import mwparserfromhell
 
-from cc_wp_book.references import extract_citation_map, rewrite_references_inplace
+from cc_wp_book.references import rewrite_references_inplace
 
 
 @dataclass
@@ -71,10 +71,7 @@ def strip_sections(
     cleaned_html = ""
     if html:
         cleaned_html = strip_sections_from_html(html, sections_to_strip)
-        # Build citation map from the *original* wikitext so li position
-        # numbers align with Wikipedia's renderer (which sees the full doc).
-        citations = extract_citation_map(wikitext)
-        cleaned_html = rewrite_references_inplace(cleaned_html, citations)
+        cleaned_html = rewrite_references_inplace(cleaned_html, wikitext)
         cleaned_html = reposition_infobox(cleaned_html)
         # Strip <style> blocks — we provide our own print CSS
         cleaned_html = re.sub(

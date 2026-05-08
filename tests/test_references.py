@@ -179,18 +179,56 @@ class TestExtractCitationMap:
         cmap = extract_citation_map(wikitext)
         assert cmap == {}
 
-    def test_grouped_refs_skipped(self):
+    def test_grouped_refs_excluded_from_map(self):
         # Refs with group="..." belong to Notes-style separate lists and
-        # are intentionally not rewritten — left in their original form.
+        # must NOT appear in the citations map — they're left untouched
+        # in their own <ol>.
         wikitext = (
             '<ref name="body-ref">{{cite web |title=Body |year=2020}}</ref>'
             '<ref name="note1" group="n">An explanatory note.</ref>'
             '<ref name="body-ref-2">{{cite web |title=Body2 |year=2021}}</ref>'
         )
         cmap = extract_citation_map(wikitext)
-        assert list(cmap.keys()) == [1, 2]
-        assert cmap[1].title == "Body"
-        assert cmap[2].title == "Body2"
+        # Only the two body refs are in the map; positions are sequential
+        # over default-group refs (named first).
+        titles = sorted(c.title for c in cmap.values() if c.title)
+        assert titles == ["Body", "Body2"]
+
+    def test_refs_inside_grouped_reflist_excluded(self):
+        # <ref> tags declared inside {{reflist|group=...|refs=...}} inherit
+        # the parent's group even without their own group attribute.
+        wikitext = (
+            '<ref name="body">{{cite web |title=Body |year=2020}}</ref>'
+            '{{reflist |group=n |refs='
+            '<ref name="note">An explanatory note.</ref>'
+            '<ref>Anonymous note inside reflist.</ref>'
+            '}}'
+            '<ref name="body2">{{cite web |title=Body2 |year=2021}}</ref>'
+        )
+        cmap = extract_citation_map(wikitext)
+        titles = sorted(c.title for c in cmap.values() if c.title)
+        assert titles == ["Body", "Body2"]
+        # Notes content should NOT be in the map
+        for c in cmap.values():
+            assert c.raw_html != "An explanatory note."
+            assert c.raw_html != "Anonymous note inside reflist."
+
+    def test_grouped_name_first_seen_without_group_attr(self):
+        # Tricky case: first body occurrence is `<ref name="X" />` (no
+        # group attr), declaration is later inside a grouped reflist.
+        # Wikipedia treats the name as belonging to the reflist's group,
+        # and so should we.
+        wikitext = (
+            '<ref name="body">{{cite web |title=Body |year=2020}}</ref>'
+            '<ref name="note" />'
+            '{{reflist |group=n |refs='
+            '<ref name="note">An explanatory note.</ref>'
+            '}}'
+        )
+        cmap = extract_citation_map(wikitext)
+        # "note" should NOT appear in the map — it's grouped via reflist.
+        titles = sorted(c.title for c in cmap.values() if c.title)
+        assert titles == ["Body"]
 
 
 class TestShortenedAndRenderDedup:
@@ -264,66 +302,93 @@ class TestShortenedAndRenderDedup:
 
 
 class TestRewriteReferencesInplace:
-    def test_replaces_li_content_when_position_matches(self):
+    def test_rewrites_named_li_by_name_match(self):
+        wikitext = (
+            '<ref name="body">{{cite web |title=Body |year=2020 |website=W}}</ref>'
+        )
         html = (
+            '<h2>References</h2>'
             '<ol class="references">'
-            '<li id="cite_note-x-1">old content</li>'
-            '<li id="cite_note-2">other old</li>'
+            '<li id="cite_note-body-1">old content</li>'
             '</ol>'
         )
-        cmap = {
-            1: Citation(type="free", raw_html="new one"),
-            2: Citation(type="free", raw_html="new two"),
-        }
-        result = rewrite_references_inplace(html, cmap)
+        result = rewrite_references_inplace(html, wikitext)
         assert "old content" not in result
-        assert "other old" not in result
-        assert "new one" in result
-        assert "new two" in result
-        assert 'id="cite_note-x-1"' in result
-        assert 'id="cite_note-2"' in result
+        assert "Body" in result
+        assert 'id="cite_note-body-1"' in result
 
-    def test_leaves_unmapped_li_unchanged(self):
-        html = (
-            '<ol class="references">'
-            '<li id="cite_note-x-1">replace me</li>'
-            '<li id="cite_note-note1-2">explanatory footnote</li>'
-            '</ol>'
+    def test_leaves_notes_ol_untouched(self):
+        # The <ol> immediately following <h2>Notes</h2> is left alone —
+        # Notes-section work is deferred. Only the References <ol> is
+        # rewritten.
+        wikitext = (
+            '<ref name="body">{{cite web |title=BodyTitle |year=2020}}</ref>'
+            '<ref name="explanation" group="n">An explanatory note.</ref>'
         )
-        cmap = {1: Citation(type="free", raw_html="new")}
-        result = rewrite_references_inplace(html, cmap)
-        assert "new" in result
-        assert "replace me" not in result
-        assert "explanatory footnote" in result  # untouched
-
-    def test_handles_html_entity_encoded_ids(self):
-        # Wikipedia HTML uses &#95; for _ in some contexts.
-        html = '<li id="cite&#95;note-foo-1">old</li>'
-        cmap = {1: Citation(type="free", raw_html="new")}
-        result = rewrite_references_inplace(html, cmap)
-        assert "new" in result
-        assert "old" not in result
-
-    def test_preserves_multiple_ol_blocks(self):
-        # Notes section + References section — both should keep their
-        # <ol> structure; only the entries we have data for get rewritten.
         html = (
             '<h2>Notes</h2>'
-            '<ol class="references"><li id="cite_note-noteA-1">note one</li></ol>'
+            '<ol class="references">'
+            '<li id="cite_note-explanation-1">original note text — keep me</li>'
+            '</ol>'
             '<h2>References</h2>'
-            '<ol class="references"><li id="cite_note-mainref-2">main ref</li></ol>'
+            '<ol class="references">'
+            '<li id="cite_note-body-2">old body ref</li>'
+            '</ol>'
         )
-        cmap = {2: Citation(type="free", raw_html="compact main")}
-        result = rewrite_references_inplace(html, cmap)
-        # Both <ol> blocks survive
-        assert result.count('<ol class="references">') == 2
-        # Notes <li> untouched
-        assert "note one" in result
-        # References <li> rewritten
-        assert "compact main" in result
-        assert "main ref" not in result
+        result = rewrite_references_inplace(html, wikitext)
+        assert "original note text — keep me" in result
+        assert "old body ref" not in result
+        assert "BodyTitle" in result
 
-    def test_empty_map_no_changes(self):
-        html = '<li id="cite_note-x-1">content</li>'
-        result = rewrite_references_inplace(html, {})
+    def test_anonymous_li_matched_by_position(self):
+        wikitext = (
+            '<ref>{{cite web |title=AnonA |year=2020 |website=W}}</ref>'
+            '<ref>{{cite web |title=AnonB |year=2021 |website=W}}</ref>'
+        )
+        html = (
+            '<h2>References</h2>'
+            '<ol class="references">'
+            '<li id="cite_note-1">old A</li>'
+            '<li id="cite_note-2">old B</li>'
+            '</ol>'
+        )
+        result = rewrite_references_inplace(html, wikitext)
+        assert "old A" not in result
+        assert "old B" not in result
+        assert "AnonA" in result
+        assert "AnonB" in result
+
+    def test_unmapped_named_li_unchanged(self):
+        wikitext = (
+            '<ref name="known">{{cite web |title=Known |year=2020}}</ref>'
+        )
+        html = (
+            '<h2>References</h2>'
+            '<ol class="references">'
+            '<li id="cite_note-known-1">replace me</li>'
+            '<li id="cite_note-mystery-2">leave me alone</li>'
+            '</ol>'
+        )
+        result = rewrite_references_inplace(html, wikitext)
+        assert "replace me" not in result
+        assert "Known" in result
+        assert "leave me alone" in result
+
+    def test_handles_html_entity_encoded_ids(self):
+        wikitext = '<ref name="foo">{{cite web |title=Found |year=2020}}</ref>'
+        html = (
+            '<h2>References</h2>'
+            '<ol class="references"><li id="cite&#95;note-foo-1">old</li></ol>'
+        )
+        result = rewrite_references_inplace(html, wikitext)
+        assert "old" not in result
+        assert "Found" in result
+
+    def test_no_default_refs_no_changes(self):
+        wikitext = '<ref name="x" group="n">A note.</ref>'
+        html = (
+            '<h2>References</h2>'
+            '<ol class="references"><li id="cite_note-x-1">content</li></ol>'
+        )
+        result = rewrite_references_inplace(html, wikitext)
         assert result == html

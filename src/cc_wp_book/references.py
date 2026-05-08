@@ -180,22 +180,69 @@ def _build_citation_from_tag(tag) -> Optional[Citation]:
     return Citation(type="free", raw_html=raw)
 
 
-def extract_citation_map(wikitext: str) -> dict[int, Citation]:
-    """Build {visible_position: Citation} aligned with Wikipedia's renderer.
+def _grouped_ref_tag_ids(parsed) -> set[int]:
+    """Collect id() values of <ref> tags that belong to a non-default group.
 
-    Walks <ref> tags recursively so refs inside templates and tables are
-    picked up (matches Wikipedia's renderer behavior).
+    Includes:
+    - Refs with explicit `group="..."` attribute.
+    - Refs declared inside `{{reflist|group=...|refs=...}}` templates.
 
-    Dedupe matches Wikipedia: named refs first occurrence wins; subsequent
-    occurrences (self-closing reuse or repeated content) share the position.
-    Anonymous refs are NOT deduped by content — each anonymous <ref> tag is
-    its own entry, even if textually identical, since they often differ in
-    page= or other params (Wikipedia treats them as distinct).
+    Note: `{{refn|group=n|...}}` templates create their own refs that we
+    don't pick up via `<ref>` tag walking — those notes are left in their
+    original Wikipedia rendering since we skip the Notes <ol> wholesale.
+    """
+    grouped: set[int] = set()
+    for template in parsed.filter_templates():
+        name = str(template.name).strip().lower()
+        if not name.startswith("reflist"):
+            continue
+        if not template.has("group"):
+            continue
+        if not template.has("refs"):
+            continue
+        for ref_tag in template.get("refs").value.filter_tags():
+            if str(ref_tag.tag).lower() == "ref":
+                grouped.add(id(ref_tag))
+    return grouped
+
+
+@dataclass
+class _ExtractedCitations:
+    by_name: dict[str, Citation]
+    anonymous: list[Citation]  # in document order
+
+
+def _extract_default_group_citations(wikitext: str) -> _ExtractedCitations:
+    """Walk wikitext for default-group refs only.
+
+    Returns:
+        by_name: {ref_name: Citation} for named default-group refs.
+        anonymous: list of Citations for anonymous default-group refs in
+                   the order they first appear in the document.
+
+    Refs in non-default groups (explicit `group=` or inside grouped reflist
+    templates) are skipped — their corresponding <li> entries live in the
+    Notes <ol>, which we leave untouched in the HTML rewrite.
     """
     parsed = mwparserfromhell.parse(wikitext)
-    name_positions: dict[str, int] = {}
-    citations: dict[int, Citation] = {}
-    next_pos = 1
+    grouped = _grouped_ref_tag_ids(parsed)
+
+    # First, determine grouping per name (a name is grouped if ANY
+    # occurrence has the group attribute or sits in a grouped reflist).
+    name_grouped: dict[str, bool] = {}
+    for tag in parsed.filter_tags():
+        if str(tag.tag).lower() != "ref":
+            continue
+        if not tag.has("name"):
+            continue
+        name = str(tag.get("name").value).strip()
+        if tag.has("group") or id(tag) in grouped:
+            name_grouped[name] = True
+        elif name not in name_grouped:
+            name_grouped[name] = False
+
+    by_name: dict[str, Citation] = {}
+    anonymous: list[Citation] = []
 
     for tag in parsed.filter_tags():
         if str(tag.tag).lower() != "ref":
@@ -203,25 +250,44 @@ def extract_citation_map(wikitext: str) -> dict[int, Citation]:
         if not tag.contents:
             continue
 
-        # Skip refs in non-default groups (e.g., group="n" for Notes).
-        # Those have their own <ol class="references"> rendered separately
-        # and are intentionally left untouched here.
-        if tag.has("group"):
-            continue
-
         if tag.has("name"):
             name = str(tag.get("name").value).strip()
-            if name in name_positions:
+            if name_grouped.get(name, False):
                 continue
-            name_positions[name] = next_pos
+            if name in by_name:
+                continue
+            citation = _build_citation_from_tag(tag)
+            if citation is not None:
+                by_name[name] = citation
+        else:
+            tag_grouped = tag.has("group") or id(tag) in grouped
+            if tag_grouped:
+                continue
+            citation = _build_citation_from_tag(tag)
+            if citation is not None:
+                anonymous.append(citation)
 
-        citation = _build_citation_from_tag(tag)
-        if citation is None:
-            continue
-        citations[next_pos] = citation
-        next_pos += 1
+    return _ExtractedCitations(by_name=by_name, anonymous=anonymous)
 
-    return citations
+
+def extract_citation_map(wikitext: str) -> dict[int, Citation]:
+    """Backwards-compatible position-keyed view used by tests.
+
+    Returns positions 1..N over the union of named and anonymous
+    default-group citations, ordered named first then anonymous-by-document.
+    Real HTML rewrite uses the by-name + by-anonymous-position lookup
+    (`rewrite_references_inplace`), not this map.
+    """
+    extracted = _extract_default_group_citations(wikitext)
+    out: dict[int, Citation] = {}
+    n = 1
+    for citation in extracted.by_name.values():
+        out[n] = citation
+        n += 1
+    for citation in extracted.anonymous:
+        out[n] = citation
+        n += 1
+    return out
 
 
 def _terminate(s: str) -> str:
@@ -333,41 +399,106 @@ _LI_PATTERN = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 
+_OL_PATTERN = re.compile(
+    r'<ol class="references[^"]*"[^>]*>.*?</ol>',
+    re.DOTALL,
+)
 
-def _position_from_li_id(id_value: str) -> Optional[int]:
-    """Extract trailing position number from a cite_note id.
 
-    Both `cite_note-NAME-N` and `cite_note-N` end with the visible
-    list-position number. We just match the trailing digits.
-    """
-    m = re.search(r"(\d+)$", id_value)
-    return int(m.group(1)) if m else None
+def _name_from_li_id(id_value: str) -> Optional[str]:
+    """Extract the ref-name from a cite_note id like `NAME-N`. Returns
+    None for purely numeric (anonymous) IDs. Decodes HTML entity-escaped
+    underscores."""
+    decoded = id_value.replace("&#95;", "_")
+    m = re.match(r"^(.+?)-\d+$", decoded)
+    if m:
+        return m.group(1)
+    return None  # purely numeric → anonymous
+
+
+def _heading_preceding(html: str, ol_start: int) -> str:
+    """Return the text of the most recent <h2>/<h3> before ol_start, or ''."""
+    preceding = html[:ol_start]
+    h_matches = list(re.finditer(
+        r'<h[2-3][^>]*>(.*?)</h[2-3]>', preceding, re.DOTALL,
+    ))
+    if not h_matches:
+        return ""
+    inner = h_matches[-1].group(1)
+    return re.sub(r"<[^>]+>", "", inner).strip()
+
+
+def _is_notes_ol(heading_text: str) -> bool:
+    return heading_text.strip().lower() == "notes"
 
 
 def rewrite_references_inplace(
-    html: str, citations: dict[int, Citation]
+    html: str, wikitext: str
 ) -> str:
-    """For each <li id="cite_note-..."> in HTML, replace its inner content
-    with our compact rendering if we have a Citation for that position.
-    Otherwise leave the <li> unchanged.
+    """Walk each <ol class="references"> in HTML and rewrite its <li>
+    entries using our compact CS1 rendering, EXCEPT for the Notes <ol>
+    which is left entirely untouched.
 
-    Repeat occurrences of the same source render in shortened form
-    ('Rohli et al. (2018), p. 32.') to save space.
+    Within each rewritten <ol>:
+    - Named refs (li id `cite_note-NAME-N`) are matched to wikitext by NAME.
+    - Anonymous refs (li id `cite_note-N`) are matched by their position in
+      the default-group anonymous-ref sequence within this <ol>.
+    - Same-source repeats render as shortened form (Author (Year), p. N.).
     """
-    if not citations:
+    extracted = _extract_default_group_citations(wikitext)
+    if not extracted.by_name and not extracted.anonymous:
         return html
 
-    rendered = render_citations(citations)
+    # Pre-render with same-source dedupe applied across the whole bibliography.
+    # Walk in the order: named (sorted by first-seen — already preserved by
+    # dict insertion order) then anonymous (in document order).
+    all_in_order: list[Citation] = list(extracted.by_name.values()) + list(
+        extracted.anonymous
+    )
+    rendered_full: dict[int, str] = render_citations(
+        {i: c for i, c in enumerate(all_in_order)}
+    )
+    name_to_render = {
+        name: rendered_full[i]
+        for i, name in enumerate(extracted.by_name.keys())
+    }
+    anon_renders = [
+        rendered_full[len(extracted.by_name) + i]
+        for i in range(len(extracted.anonymous))
+    ]
 
-    def replace(match: re.Match) -> str:
-        opening = match.group(1)
-        id_value = match.group(2)
-        closing = match.group(4)
+    def rewrite_one_ol(ol_html: str, anon_cursor: list[int]) -> str:
+        def replace(match: re.Match) -> str:
+            opening = match.group(1)
+            id_value = match.group(2)
+            closing = match.group(4)
 
-        position = _position_from_li_id(id_value)
-        if position is None or position not in rendered:
-            return match.group(0)
+            ref_name = _name_from_li_id(id_value)
+            if ref_name is not None:
+                rendered = name_to_render.get(ref_name)
+                if rendered is None:
+                    return match.group(0)
+                return f"{opening}{rendered}{closing}"
+            else:
+                if anon_cursor[0] >= len(anon_renders):
+                    return match.group(0)
+                rendered = anon_renders[anon_cursor[0]]
+                anon_cursor[0] += 1
+                return f"{opening}{rendered}{closing}"
 
-        return f"{opening}{rendered[position]}{closing}"
+        return _LI_PATTERN.sub(replace, ol_html)
 
-    return _LI_PATTERN.sub(replace, html)
+    anon_cursor = [0]
+    out_parts: list[str] = []
+    last_end = 0
+
+    for ol_match in _OL_PATTERN.finditer(html):
+        out_parts.append(html[last_end:ol_match.start()])
+        heading = _heading_preceding(html, ol_match.start())
+        if _is_notes_ol(heading):
+            out_parts.append(ol_match.group(0))  # untouched
+        else:
+            out_parts.append(rewrite_one_ol(ol_match.group(0), anon_cursor))
+        last_end = ol_match.end()
+    out_parts.append(html[last_end:])
+    return "".join(out_parts)
