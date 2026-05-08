@@ -4,6 +4,8 @@ from cc_wp_book.references import (
     Citation,
     extract_citation_map,
     format_compact,
+    format_shortened,
+    render_citations,
     rewrite_references_inplace,
 )
 
@@ -189,6 +191,76 @@ class TestExtractCitationMap:
         assert list(cmap.keys()) == [1, 2]
         assert cmap[1].title == "Body"
         assert cmap[2].title == "Body2"
+
+
+class TestShortenedAndRenderDedup:
+    def test_shortened_form_book(self):
+        c = Citation(
+            type="book", author="Rohli, R. V. et al.", year="2018",
+            title="Climatology", container="Jones & Bartlett",
+            pages="p. 32",
+        )
+        assert format_shortened(c) == "Rohli et al. (2018), p. 32."
+
+    def test_shortened_single_author(self):
+        c = Citation(
+            type="book", author="Smith, J.", year="2010",
+            title="Geology", pages="p. 45",
+        )
+        assert format_shortened(c) == "Smith (2010), p. 45."
+
+    def test_shortened_no_pages(self):
+        c = Citation(type="book", author="Smith, J.", year="2010", title="T")
+        assert format_shortened(c) == "Smith (2010)."
+
+    def test_render_first_full_subsequent_short(self):
+        cites = {
+            1: Citation(type="book", author="Rohli, R. V. et al.", year="2018",
+                        title="Climatology", container="Jones & Bartlett", pages="p. 49"),
+            2: Citation(type="book", author="Rohli, R. V. et al.", year="2018",
+                        title="Climatology", container="Jones & Bartlett", pages="p. 32"),
+            3: Citation(type="book", author="Rohli, R. V. et al.", year="2018",
+                        title="Climatology", container="Jones & Bartlett", pages="p. 159"),
+        }
+        rendered = render_citations(cites)
+        assert "<i>Climatology</i>" in rendered[1]
+        assert "Jones & Bartlett" in rendered[1]
+        assert "p. 49" in rendered[1]
+        assert rendered[2] == "Rohli et al. (2018), p. 32."
+        assert rendered[3] == "Rohli et al. (2018), p. 159."
+
+    def test_render_distinct_sources_each_full(self):
+        cites = {
+            1: Citation(type="book", author="Smith, J.", year="2010", title="A"),
+            2: Citation(type="book", author="Jones, K.", year="2015", title="B"),
+        }
+        rendered = render_citations(cites)
+        assert "<i>A</i>" in rendered[1]
+        assert "<i>B</i>" in rendered[2]
+        # Neither should be in shortened form
+        assert "Smith (2010)" not in rendered[1] or "<i>" in rendered[1]
+        assert "Jones (2015)" not in rendered[2] or "<i>" in rendered[2]
+
+    def test_render_free_text_not_deduped(self):
+        # Free-text refs are explanatory notes — never dedupe even if identical.
+        cites = {
+            1: Citation(type="free", raw_html="A note."),
+            2: Citation(type="free", raw_html="A note."),
+        }
+        rendered = render_citations(cites)
+        assert rendered[1] == "A note."
+        assert rendered[2] == "A note."
+
+    def test_render_uses_first_position_as_canonical(self):
+        # If position 5 is the first appearance, position 10 is the repeat.
+        # Walking sorted positions ensures lower positions get the full form.
+        cites = {
+            10: Citation(type="book", author="Smith, J.", year="2010", title="T", pages="p. 99"),
+            5: Citation(type="book", author="Smith, J.", year="2010", title="T", pages="p. 1"),
+        }
+        rendered = render_citations(cites)
+        assert "<i>T</i>" in rendered[5]  # canonical
+        assert rendered[10] == "Smith (2010), p. 99."  # short form
 
 
 class TestRewriteReferencesInplace:

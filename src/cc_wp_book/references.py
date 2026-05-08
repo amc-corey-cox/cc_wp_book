@@ -228,6 +228,66 @@ def _terminate(s: str) -> str:
     return s if s.endswith(".") else s + "."
 
 
+def _essence_key(c: Citation):
+    """Identity key for a citation (excludes pages and raw_html).
+
+    Two citations sharing this key are the same source — they may differ
+    only in which page is being cited. Returns None if the citation isn't
+    a candidate for dedupe (free text, missing fields).
+    """
+    if c.type == "free":
+        return None
+    if not (c.author or c.title):
+        return None
+    return (c.type, c.author, c.year, c.title, c.container, c.volume, c.issue, c.chapter)
+
+
+def _short_author(author: str) -> str:
+    """Reduce 'Last, F.' / 'Last, F. et al.' → 'Last' / 'Last et al.'"""
+    is_etal = "et al" in author
+    head = author.split(",")[0] if "," in author else author.split()[0]
+    head = head.rstrip(".")
+    return f"{head} et al." if is_etal else head
+
+
+def format_shortened(c: Citation) -> str:
+    """Short academic-style backreference: 'Author (Year), p. N.'
+
+    Used for the 2nd and later occurrences of the same source in the
+    bibliography — saves roughly 60-70% per repeat versus the full form.
+    """
+    parts: list[str] = []
+    if c.author:
+        parts.append(_short_author(c.author))
+    if c.year:
+        parts.append(f"({c.year})")
+    base = " ".join(parts) or (c.title or "Cited source")
+    if c.pages:
+        return f"{base}, {c.pages}."
+    return base + "."
+
+
+def render_citations(citations: dict[int, Citation]) -> dict[int, str]:
+    """Render every citation, using shortened form for repeat occurrences
+    of the same source. Walks positions in order so the first occurrence
+    gets the full citation and subsequent ones get the short form.
+    """
+    rendered: dict[int, str] = {}
+    seen: dict[tuple, int] = {}
+
+    for pos in sorted(citations):
+        c = citations[pos]
+        key = _essence_key(c)
+        if key is not None and key in seen:
+            rendered[pos] = format_shortened(c)
+        else:
+            if key is not None:
+                seen[key] = pos
+            rendered[pos] = format_compact(c)
+
+    return rendered
+
+
 def format_compact(c: Citation) -> str:
     if c.type == "free":
         return c.raw_html or ""
@@ -290,9 +350,14 @@ def rewrite_references_inplace(
     """For each <li id="cite_note-..."> in HTML, replace its inner content
     with our compact rendering if we have a Citation for that position.
     Otherwise leave the <li> unchanged.
+
+    Repeat occurrences of the same source render in shortened form
+    ('Rohli et al. (2018), p. 32.') to save space.
     """
     if not citations:
         return html
+
+    rendered = render_citations(citations)
 
     def replace(match: re.Match) -> str:
         opening = match.group(1)
@@ -300,13 +365,9 @@ def rewrite_references_inplace(
         closing = match.group(4)
 
         position = _position_from_li_id(id_value)
-        if position is None:
+        if position is None or position not in rendered:
             return match.group(0)
 
-        citation = citations.get(position)
-        if citation is None:
-            return match.group(0)
-
-        return f"{opening}{format_compact(citation)}{closing}"
+        return f"{opening}{rendered[position]}{closing}"
 
     return _LI_PATTERN.sub(replace, html)
