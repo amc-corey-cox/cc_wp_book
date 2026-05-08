@@ -83,12 +83,12 @@ def _format_authors(template) -> str | None:
             return author1 + (" et al." if has_more else "")
         return None
 
-    initials = " " + _initials(first1) if first1 else ""
+    head = f"{last1}, {_initials(first1)}" if first1 else last1
     has_more = (
         template.has("last2") or template.has("author2")
         or _get_param(template, "display-authors") == "etal"
     )
-    return f"{last1},{initials}" + (" et al." if has_more else "")
+    return head + (" et al." if has_more else "")
 
 
 def _format_editors(template) -> str | None:
@@ -96,8 +96,8 @@ def _format_editors(template) -> str | None:
     first = _get_param(template, "editor-first", "editor1-first")
     if not last:
         return None
-    initials = " " + _initials(first) if first else ""
-    return f"{last},{initials} (ed.)"
+    head = f"{last}, {_initials(first)}" if first else last
+    return f"{head} (ed.)"
 
 
 def _format_year(template) -> str | None:
@@ -323,13 +323,23 @@ def format_shortened(c: Citation) -> str:
 
     Used for the 2nd and later occurrences of the same source in the
     bibliography — saves roughly 60-70% per repeat versus the full form.
+
+    For no-author sources (typical of web refs), uses container or title
+    as the short identifier so the shortened form remains meaningful
+    rather than degenerating to just '(YYYY).'.
     """
-    parts: list[str] = []
     if c.author:
-        parts.append(_short_author(c.author))
+        identifier = _short_author(c.author)
+    elif c.container:
+        identifier = f"<i>{c.container}</i>"
+    elif c.title:
+        identifier = f'"{c.title}"'
+    else:
+        identifier = "Cited source"
+
+    base = identifier
     if c.year:
-        parts.append(f"({c.year})")
-    base = " ".join(parts) or (c.title or "Cited source")
+        base = f"{base} ({c.year})"
     if c.pages:
         return f"{base}, {c.pages}."
     return base + "."

@@ -201,7 +201,7 @@ def strip_sections_from_html(
         r'<div\s+class="[^"]*\bmw-heading\b[^"]*"[^>]*>.*?'
         r'<h(\d)\b[^>]*>(.*?)</h\1>.*?</div>'
         r'|'
-        r'<h(\d)\b[^>]*>(.*?)</h\d>',
+        r'<h(\d)\b[^>]*>(.*?)</h\3>',
         re.DOTALL,
     )
 

@@ -85,6 +85,26 @@ class TestFormatCompactFreeText:
         assert format_compact(c) == "Some inline footnote text."
 
 
+class TestAuthorEditorEdgeCases:
+    def test_author_last_only_no_initials(self):
+        # When `last=` is present but `first=` is missing, the rendered
+        # author should be just "Last." — no trailing comma.
+        wikitext = '<ref>{{cite book |last=Wilkinson |year=2009 |title=T}}</ref>'
+        cmap = extract_citation_map(wikitext)
+        assert cmap[1].author == "Wilkinson"
+        rendered = format_compact(cmap[1])
+        assert "Wilkinson," not in rendered  # no trailing comma artifact
+        assert rendered.startswith("Wilkinson.")
+
+    def test_editor_last_only_no_initials(self):
+        wikitext = (
+            "<ref>{{cite book |editor-last=Smith |year=2010"
+            " |title=T |publisher=P}}</ref>"
+        )
+        cmap = extract_citation_map(wikitext)
+        assert cmap[1].author == "Smith (ed.)"
+
+
 class TestExtractCitationMap:
     def test_named_ref_with_cite_book_at_position_one(self):
         wikitext = (
@@ -256,6 +276,22 @@ class TestShortenedAndRenderDedup:
     def test_shortened_no_pages(self):
         c = Citation(type="book", author="Smith, J.", year="2010", title="T")
         assert format_shortened(c) == "Smith (2010)."
+
+    def test_shortened_no_author_uses_container(self):
+        # Repeated no-author web ref should use container as the short id,
+        # not degenerate to just '(YYYY).' which is unhelpful.
+        c = Citation(
+            type="web", year="2013",
+            title="Atmospheres and Planetary Temperatures",
+            container="American Chemical Society",
+        )
+        assert format_shortened(c) == (
+            "<i>American Chemical Society</i> (2013)."
+        )
+
+    def test_shortened_no_author_no_container_uses_title(self):
+        c = Citation(type="web", year="2020", title="Some Page")
+        assert format_shortened(c) == '"Some Page" (2020).'
 
     def test_render_first_full_subsequent_short(self):
         def rohli(pages):
