@@ -125,28 +125,28 @@ def reposition_infobox(html: str) -> str:
     if not infobox_match:
         return html
 
-    infobox_html = _extract_table(html, infobox_match.start())
-    if not infobox_html:
+    extracted_html = _extract_table(html, infobox_match.start())
+    if not extracted_html:
         return html
 
     # Strip the image row and caption from the infobox
-    infobox_html = _strip_infobox_image(infobox_html)
+    stripped_html = _strip_infobox_image(extracted_html)
 
-    # Remove infobox from original position
+    # Remove infobox from original position — slice with the *original* length
     html_without = (
         html[:infobox_match.start()] +
-        html[infobox_match.start() + len(infobox_html):]
+        html[infobox_match.start() + len(extracted_html):]
     )
 
     # Find first <h2> — the boundary between lead and body sections
     first_h2 = re.search(r"<h2[\s>]", html_without)
     if not first_h2:
-        return html_without + _wrap_infobox(infobox_html)
+        return html_without + _wrap_infobox(stripped_html)
 
     insert_pos = first_h2.start()
     return (
         html_without[:insert_pos] +
-        _wrap_infobox(infobox_html) +
+        _wrap_infobox(stripped_html) +
         html_without[insert_pos:]
     )
 

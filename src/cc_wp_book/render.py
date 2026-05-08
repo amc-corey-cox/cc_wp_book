@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 from pathlib import Path
 
@@ -34,6 +35,8 @@ def render_article_html(
             qr_size_in=cfg.qr_size_in,
         )
 
+    title_escaped = html.escape(title, quote=True)
+
     lead_image_tag = ""
     if lead_image_path:
         if lead_image_path.startswith("/"):
@@ -42,7 +45,7 @@ def render_article_html(
             src = lead_image_path
         lead_image_tag = (
             f'<div class="lead-image">'
-            f'<img src="{src}" alt="{title}" />'
+            f'<img src="{src}" alt="{title_escaped}" />'
             f"</div>"
         )
 
@@ -54,7 +57,7 @@ def render_article_html(
     return f"""<article class="wiki-article">
   <header class="article-header">
     {lead_image_tag}
-    <h1 style="font-family: {heading_family};">{title}</h1>
+    <h1 style="font-family: {heading_family};">{title_escaped}</h1>
   </header>
   <div class="article-body"
        style="font-family: {font_family};

@@ -217,4 +217,45 @@ class TestRepositionInfobox:
         )
         result = reposition_infobox(html)
         assert result.endswith("</div>")
+
+    def test_strips_caption_and_image_row_and_leaves_no_residue(self):
+        # Realistic infobox shape: <caption>, infobox-image row, then data rows.
+        # This also guards the slice-length bug: stripping shrinks the table,
+        # so the original-position removal must use the *extracted* length,
+        # not the stripped length, or trailing markup leaks into html_without.
+        html = (
+            '<table class="infobox">'
+            '<caption>Earth</caption>'
+            '<tr><td class="infobox-image">'
+            '<img src="//upload/earth.jpg" alt="Earth" />'
+            '</td></tr>'
+            '<tr><th>Aphelion</th><td>152,097,597 km</td></tr>'
+            '<tr><th>Perihelion</th><td>147,098,450 km</td></tr>'
+            '</table>'
+            '<p>Earth is the third planet from the Sun.</p>'
+            '<h2>Etymology</h2>'
+            '<p>The word "Earth" derives from...</p>'
+        )
+        result = reposition_infobox(html)
+
+        # Caption and image row gone from the wrapped output
+        assert "<caption>" not in result
+        assert "infobox-image" not in result
+        assert "earth.jpg" not in result
+
+        # Data rows preserved
+        assert "Aphelion" in result
+        assert "Perihelion" in result
+
+        # No residue: the original infobox slot must be fully gone, with no
+        # stray "</td></tr></table>" fragments before the lead paragraph.
+        wrapper_start = result.index('<div class="infobox-print-wrapper">')
+        head = result[:wrapper_start]
+        assert "<table" not in head
+        assert "</table>" not in head
+        assert "</tr>" not in head
+        assert "</td>" not in head
+
+        # Tables stay balanced overall
+        assert result.count("<table") == result.count("</table>")
         assert "infobox-print-wrapper" in result
